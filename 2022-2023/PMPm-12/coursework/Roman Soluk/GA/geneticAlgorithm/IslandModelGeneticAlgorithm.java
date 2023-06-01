@@ -1,0 +1,127 @@
+package GA.geneticAlgorithm;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+
+import GA.Chromosome;
+import GA.Function;
+import GA.operation.crossover.Crossover;
+import GA.operation.mutation.Mutation;
+import GA.operation.selection.Selection;
+
+public class IslandModelGeneticAlgorithm extends GeneticAlgorithm{
+    private int generationCounter = 500;
+    private int noChangeIter = 20;
+    private static final Random random = new Random();
+    private Selection selection;
+    private Mutation mutation;
+    private Crossover crossover;
+
+    private List<Function> nonlinearSystem;
+    protected final Random gene = new Random();
+
+    public IslandModelGeneticAlgorithm(Selection selection, Mutation mutation, Crossover crossover, List<Function> nonlinearSystem) {
+        super();
+        //super(selection, mutation, crossover, nonlinearSystem);
+        this.selection = selection;
+        this.mutation = mutation;
+        this.crossover = crossover;
+        this.nonlinearSystem = nonlinearSystem;
+    }
+
+    public double systemGenerationMin(double a, double b, double precision, int population, double mutationProbability, double crossoverProbability) {
+      return 0;
+    }
+
+    @Override
+    public double executeAlgorithm(double a, double b, double precision, int[] populations, double mutationProbability, double crossoverProbability) throws ExecutionException, InterruptedException {
+        List<Double> populationMin = new ArrayList<>();
+        int bitNumber = getBitNum(a, b, precision);
+        int varNum = nonlinearSystem.size();
+        List<List<Chromosome>> population = selection.formPopulation(bitNumber * varNum, populations.length, populations[0]);
+
+        ExecutorService executor = Executors.newFixedThreadPool(5);
+
+        double generationCounter1 = 0;
+        double noChangeIter1 = 0;
+        List<Callable<List<Double>>> tasks = new ArrayList<>(); // List to store tasks
+
+        for (int i = 0; i < populations.length; i++) {
+            double generationMin = 0;
+            List<Double> generationMinimum = new ArrayList<>();
+            while (generationCounter1 < this.generationCounter && noChangeIter1 < this.noChangeIter) {
+                double result = 0;
+
+                List<Double> generationValue = new ArrayList<>();
+                final List<Chromosome>[] generation = new List[]{population.get(i)};
+                int populationSize = populations[i];
+                for (int k = 0; k < populationSize; k++) {
+                    final int chromosomeIndex = k;
+                    int finalI = i;
+                    Callable<List<Double>> task = () -> {
+                        double result1 = 0;
+                        if (getProbabilityCheck(mutationProbability)) {
+                            Chromosome chromosomeToMutate = generation[0].get(finalI);
+                            generation[0].remove(finalI);
+                            generation[0].add(mutation.mutate(chromosomeToMutate));
+                        }
+                        if (getProbabilityCheck(crossoverProbability)) {
+                            generation[0] = crossover.crossover(generation[0], finalI, random.nextInt(populationSize));
+                        }
+                        for (int j = 0; j < varNum; j++) {
+                            result1 = 0;
+                            List<Chromosome> var = new ArrayList<>();
+                            for (int v = 0; v < varNum; v++) {
+                                var.add(getVariable(v * bitNumber, bitNumber, generation[0].get(finalI).getGenes()));
+                            }
+                            result1 += Math.abs(nonlinearSystem.get(j).apply(getResult(a, b, var)));
+                            generationValue.add(result1);
+                        }
+
+                        return generationValue;
+                    };
+                    tasks.add(task);
+                }
+                generationMin = Collections.min(generationValue);
+                population = selection.executeModification(population, generationValue, i);
+
+                if (generationMinimum.isEmpty()) {
+                    generationMinimum.add(generationMin);
+                }
+
+                if (generationMin > Collections.min(generationMinimum)) {
+                    generationMinimum.add(generationMin);
+                    noChangeIter1++;
+                } else {
+                    generationMinimum.add(generationMin);
+                    noChangeIter1 = 0;
+                }
+                generationCounter1++;
+            }
+            generationCounter1 = 0;
+            noChangeIter1 = 0;
+            populationMin.add(Collections.min(generationMinimum));
+        }
+        List<Future<List<Double>>> futures = executor.invokeAll(tasks); // Execute tasks
+        List<Double> values = new ArrayList<>();
+        for (Future<List<Double>> future : futures) {
+            values.addAll(future.get());
+        }
+        return Collections.min(values);
+    }
+
+    Chromosome getVariable(int startIndex, int length, List<Integer> list) {
+        List<Integer> sublist = new ArrayList<>();
+        for (int i = 0; i < length; i++) {
+            sublist.add(list.get(i + startIndex));
+        }
+        return new Chromosome(sublist);
+    }
+}
